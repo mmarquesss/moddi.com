@@ -99,11 +99,17 @@ h1 {
 
 .settings-panel {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin: 10px 0 2px;
 }
 
-.settings-panel button {
+.settings-group {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-group button {
   flex: 1;
   padding: 8px;
   border: 1px solid var(--border);
@@ -114,11 +120,57 @@ h1 {
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.settings-panel button.picked {
+.settings-group button.picked {
   border-color: var(--brand);
   background: var(--brand-bg);
   font-weight: 600;
   color: var(--brand-dark);
+}
+
+.settings-group button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-key {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-key input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  background: var(--surface);
+}
+
+.settings-key button {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.settings-key button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.key-status {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.engine-warning {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin: 0;
 }
 
 /* O palco (avatar + botão de falar) é o centro da tela — a conversa acontece em

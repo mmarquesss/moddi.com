@@ -34,11 +34,18 @@ function describeSpeechError(code: string): string {
   }
 }
 
+export type SpeechLang = "pt" | "en";
+export type SpeechSegment = { text: string; lang: SpeechLang };
+
 export function useSpeech() {
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Fase 10: cada chamada de speakSegments recebe um id novo — se uma resposta nova
+  // chegar enquanto a fila anterior ainda está tocando, a fila antiga se vê "velha"
+  // neste ref e para de agendar o próximo segmento, em vez de sobrepor as duas falas.
+  const speechRunId = useRef(0);
 
   const supported =
     typeof window !== "undefined" &&
@@ -87,30 +94,73 @@ export function useSpeech() {
 
   // Fase 05: Piper (TTS neural local) no lugar da speechSynthesis do navegador — voz bem
   // menos robotizada. O backend sintetiza o WAV e a gente só toca o áudio recebido.
-  async function speak(text: string) {
-    if (!text.trim()) return;
+  // Fase 10: lang escolhe a voz (pt_BR pra explicação, en_US pra frase de prática).
+  async function synthesize(text: string, lang: SpeechLang): Promise<string | null> {
+    if (!text.trim()) return null;
     try {
       const res = await fetch(`${API_URL}/api/speak`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, lang }),
         signal: AbortSignal.timeout(20_000),
       });
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-
-      audioRef.current?.pause();
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.play();
-      audio.onended = () => URL.revokeObjectURL(url);
+      return URL.createObjectURL(blob);
     } catch {
       // Piper indisponível — silencioso, a conversa em texto continua funcionando.
+      return null;
     }
   }
 
-  return { supported, listening, error, listen, stopListening, speak };
+  function playUrl(url: string): Promise<void> {
+    return new Promise((resolve) => {
+      audioRef.current?.pause();
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+      audio.play();
+    });
+  }
+
+  async function speak(text: string, lang: SpeechLang = "en") {
+    speechRunId.current += 1;
+    const url = await synthesize(text, lang);
+    if (!url) return;
+    await playUrl(url);
+    URL.revokeObjectURL(url);
+  }
+
+  // Fase 10: toca a resposta inteira da professora (não só a frase de prática), um
+  // segmento por vez, trocando de voz entre português e inglês conforme a ordem em
+  // que aparecem na resposta.
+  //
+  // Bug real corrigido: antes, cada segmento só era sintetizado quando chegava sua vez
+  // (depois do segmento anterior terminar de tocar) — como o Piper gasta ~1-2s pra
+  // sintetizar um texto novo (não cacheado, já que a resposta do agente nunca é igual
+  // à anterior), isso criava uma pausa real no meio da fala a cada troca de idioma,
+  // que parecia "travar pra mudar de voz". Agora todos os segmentos são sintetizados
+  // em paralelo antes de tocar o primeiro — a troca entre eles passa a ser só o tempo
+  // de iniciar o próximo áudio já pronto, não o tempo de gerar ele.
+  async function speakSegments(segments: SpeechSegment[]) {
+    const runId = ++speechRunId.current;
+    if (segments.length === 0) return;
+
+    const urls = await Promise.all(segments.map((s) => synthesize(s.text, s.lang)));
+
+    for (const url of urls) {
+      if (speechRunId.current !== runId) {
+        urls.forEach((u) => u && URL.revokeObjectURL(u));
+        return; // uma fala mais nova já tomou a vez
+      }
+      if (!url) continue;
+      await playUrl(url);
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  return { supported, listening, error, listen, stopListening, speak, speakSegments };
 }
 
 function normalize(s: string): string {

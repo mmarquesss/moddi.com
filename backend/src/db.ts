@@ -25,6 +25,19 @@ db.exec(`
   )
 `);
 
+// Fase 11: motor de conversa (Ollama local ou Gemini com a chave do próprio usuário).
+// ALTER TABLE em vez de recriar a CREATE TABLE acima, pra não perder o profile de quem
+// já tinha o app instalado antes desta fase.
+const profileColumns = new Set(
+  (db.prepare("PRAGMA table_info(profile)").all() as { name: string }[]).map((c) => c.name)
+);
+if (!profileColumns.has("engine")) {
+  db.exec("ALTER TABLE profile ADD COLUMN engine TEXT NOT NULL DEFAULT 'ollama'");
+}
+if (!profileColumns.has("gemini_api_key")) {
+  db.exec("ALTER TABLE profile ADD COLUMN gemini_api_key TEXT");
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS lesson_progress (
     lesson_id TEXT PRIMARY KEY,

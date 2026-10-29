@@ -24,6 +24,9 @@ https://claude.ai/code/artifact/1590f507-9d03-43ad-8104-d291880fda65
 | 07 — Polimento e PWA local | ✅ Concluída | PWA instalável, dashboard pessoal, exportar progresso, atalho no Desktop |
 | 08 — Correção e otimização | ✅ Concluída | Bug real do microfone corrigido, streaming do chat, cache de TTS, build de produção |
 | 09 — Redesign visual e voz de verdade | ✅ Concluída | Frontend redesenhado (foco em conversação), causa raiz do mic sem captar (dispositivo errado no Chrome), fala manda direto |
+| 10 — Conversa 100% em áudio | 🟡 Em andamento | Voz PT-BR + resposta inteira falada por segmentos já funcionando; falta reduzir a latência (falar durante o streaming) |
+| 11 — Motor Gemini (chave do próprio usuário) | 🟡 Em andamento | Chave + troca de motor + fallback automático implementados e testados via API; falta testar com uma chave Gemini real no navegador |
+| 12 — Otimizar o motor Ollama (velocidade + naturalidade) | ✅ Concluída | De até 90s pra 0.76-1.66s por resposta; aspas só quando há erro de verdade (risco: pode deixar passar erro às vezes) |
 
 ## Log
 
@@ -159,3 +162,155 @@ Você pediu pra deixar o front-end "com cara mais amigável e profissional" e di
   - **Testado no navegador de ponta a ponta:** mandei uma mensagem de texto pra confirmar que o envio (manual e, por extensão, o caminho da voz que usa a mesma função) continuava funcionando depois da mudança de assinatura de `sendMessage` — indicador "digitando..." apareceu, avatar mudou de humor em tempo real, resposta completa chegou via streaming.
 
 **Lição registrada:** boa parte dos "bugs" dessa fase não estavam no código do Papo Reto — eram configuração do navegador/SO (dispositivo de áudio) e um comportamento de produto que fazia sentido isolado mas não fazia mais sentido depois que a interação principal mudou de "digitar" pra "falar". Vale lembrar disso ao revisar decisões antigas quando a interface muda de foco.
+
+### 2026-10-28 — Fase 10 planejada (conversa 100% em áudio)
+
+Pedido: a conversa deve funcionar como um bate-papo real entre professora e aluno — tudo que o aluno digita (ou fala) recebe resposta **em áudio**, não só a frase de prática em inglês destacada entre aspas.
+
+**Limitação atual que motiva a fase:** desde a Fase 05, `useSpeech.speak()` e `/api/speak` só tocam a `practicePhrase` (o trecho em inglês entre aspas) — a explicação em português, que é a maior parte de toda resposta do agente desde a mudança de idioma, nunca é falada. O Piper também só tem a voz `en_US-amy-medium` instalada (`backend/voices/`), que não lê português corretamente.
+
+**Plano, em sub-fases:**
+
+1. **Voz da professora em português** — baixar uma voz Piper `pt_BR` (ex.: `pt_BR-faber-medium`, lista completa em https://github.com/rhasspy/piper/blob/master/VOICES.md) pra `backend/voices/`. `tts.ts`: `synthesizeSpeech(text, lang)` passa a escolher o modelo (`en_US-amy-medium` ou o `pt_BR-*`) por idioma do segmento, em vez de um caminho fixo.
+2. **Falar a resposta inteira, não só a frase de prática** — nova função em `tts.ts` (variação de `extractPracticePhrase`) que divide a resposta completa em segmentos ordenados `{texto, lang}`, alternando português (fora das aspas) e inglês (dentro das aspas), em vez de extrair só a última frase. `/api/speak` passa a aceitar essa lista (ou o front já manda os segmentos calculados) e devolve os áudios na ordem certa.
+3. **Fila de áudio no front** — `useSpeech.ts` ganha uma fila que toca os segmentos em sequência, trocando de voz entre PT e EN sem sobrepor; o toggle 🔊/🔇 que já existe (`App.tsx`) passa a controlar essa fala completa, não só a frase isolada.
+4. **Latência — fase crítica pra parecer um bate-papo de verdade** — hoje o áudio só pode começar depois do evento `done` do `/api/chat`, ou seja, depois da resposta de texto inteira terminar (até 90s nessa máquina, risco já registrado na Fase 08). Pra professora "falar enquanto ainda está pensando o resto", o backend precisa detectar fim de frase (`. ! ?` ou fechamento de aspas) dentro do próprio streaming NDJSON e emitir um evento novo (`{type:"speech", text, lang}`) tão que cada frase fica pronta — o front chama `/api/speak` nela sem esperar o fim da resposta.
+5. **Garantir que vale pra texto digitado, não só pra voz** — hoje falar manda a mensagem direto (Fase 09) mas digitar exige clicar "Enviar"; o áudio da resposta já dispara pelos dois caminhos porque ambos passam por `sendMessage`, então isso só precisa de teste de ponta a ponta confirmando, não mudança de código.
+6. **Nice-to-have, não bloqueia a fase:** cortar o áudio em reprodução se o aluno mandar mensagem nova no meio da fala (barge-in) — hoje só o último áudio tocado é pausado (`audioRef.current?.pause()`), confirmar que isso também esvazia a fila nova; e o avatar (`Avatar.tsx`) reagir visualmente enquanto o áudio toca (boca se movendo), não só pelo `mood`.
+
+**Risco a monitorar:** sintetizar frase por frase multiplica o número de chamadas ao Piper (hoje já cacheadas por hash em `.tts-cache/`) — pode valer medir se o overhead de spawnar o processo por frase curta compensa o ganho de latência percebida, ou se um meio-termo (sintetizar por parágrafo, não por frase) já resolve.
+
+**Próximo passo:** confirmar a voz `pt_BR` escolhida e começar pela sub-fase 1 (sem ela, nada do resto faz sentido ouvir).
+
+### 2026-10-28 — Fase 10, sub-fases 1–3 e 5 implementadas
+
+- **Voz PT-BR baixada:** `pt_BR-faber-medium` (`python3 -m piper.download_voices`) em `backend/voices/`, do lado da `en_US-amy-medium` já existente.
+- **`tts.ts`:** `VOICE_MODELS` agora é um mapa por idioma (`SpeechLang = "pt" | "en"`); `synthesizeSpeech(text, lang)` escolhe o modelo certo; cache em `.tts-cache/` passou a incluir o idioma na chave (hash de `${lang}:${text}`) pra não colidir o mesmo texto em línguas diferentes.
+- **Nova `splitSpeechSegments(text)`:** reaproveita a mesma regra de aspas da `extractPracticePhrase` (Fase 05), mas em vez de extrair só a última frase em inglês, corta a resposta inteira em segmentos ordenados `{texto, lang}` — português fora das aspas, inglês dentro (com o mesmo filtro de aspas "órfã" em português tratada como PT, não EN).
+- **`/api/chat`:** o evento `done` do streaming NDJSON agora inclui `segments` junto com `practicePhrase`. **`/api/speak`:** passou a receber `{ text, lang }` em vez de só `text`.
+- **Front (`useSpeech.ts`):** `speak(text, lang="en")` manteve a assinatura antiga (ainda usada pela Trilha pra tocar a frase isolada do exercício de repetição) e ganhou uma companheira, `speakSegments(segments)`, que toca os segmentos em sequência trocando de voz; um `speechRunId` garante que, se uma resposta nova chegar enquanto a anterior ainda está sendo falada, a fila antiga para de agendar os próximos segmentos em vez de sobrepor duas falas.
+- **`App.tsx`:** `Message` ganhou `segments`; o efeito que disparava `speak(practicePhrase)` agora chama `speakSegments(last.segments)` — a professora passa a falar a explicação em português inteira, não só a frase em inglês destacada.
+- **Testado via API (sem navegador — extensão do Claude in Chrome não conectada nesta sessão):** `curl -N /api/chat` com uma frase errada de propósito ("I have went to the store yesterday") devolveu `segments` corretamente alternados (`pt`→`en`→`pt`→`en`→`pt`→`en`); `curl /api/speak` com `lang:"pt"` e `lang:"en"` gerou dois WAVs válidos (RIFF/16-bit/22050Hz) com as vozes certas, confirmados ao ouvir com `afplay`. `tsc --noEmit` limpo nos dois lados e `npm run build` do frontend sem erros.
+- **Não testado ainda (precisa do usuário ou de uma sessão com a extensão conectada):** o fluxo completo no navegador — fila de áudio tocando PT e EN em sequência sem sobreposição, e o corte de fala (barge-in) quando uma mensagem nova é mandada no meio da fala anterior.
+
+**Risco em aberto, ainda não resolvido:** a sub-fase 4 do plano (falar por frase durante o streaming, em vez de esperar o `done`) não foi implementada — hoje o áudio só começa depois da resposta de texto inteira terminar, que pode levar até 90s nessa máquina. Pra essa resposta de teste (mais curta), o áudio começou a tocar poucos segundos depois do fim do texto; em respostas mais longas o atraso ainda deve ser perceptível.
+
+**Próximo passo:** você testar no navegador (backend em `:3001`, front buildado em `:5173` já rodando) pra confirmar que a fala soa natural e sem sobreposição; depois decidir se vale a pena atacar a sub-fase 4 (latência) ou se o atraso atual já é aceitável no uso real.
+
+### 2026-10-28 — Dois bugs reais de naturalidade corrigidos
+
+Relato: a fala estava "robotizada" e travava no meio da frase pra trocar de voz entre português e inglês.
+
+- **Causa raiz nº1 (a pausa de verdade):** em `useSpeech.speakSegments`, cada segmento só era sintetizado quando chegava sua vez — ou seja, o Piper só começava a gerar o áudio do próximo segmento depois que o anterior **terminava de tocar**. Como o Piper gasta ~1-2s pra sintetizar um texto novo (a resposta do agente nunca repete, então quase nunca bate no cache), isso criava uma pausa real a cada troca de idioma, não só uma troca de timbre. **Corrigido:** `speakSegments` agora sintetiza todos os segmentos em paralelo (`Promise.all`) antes de tocar o primeiro — a troca entre eles passa a ser só o tempo de iniciar o próximo áudio já pronto.
+- **Causa raiz nº2 (trocas demais numa resposta só):** `agent.ts` pede pro modelo citar em inglês, entre aspas, só a frase-alvo — mas o Llama 3.1 8B local nem sempre obedece: numa resposta só, ele citava a forma errada ("I has two cats"), a forma certa ("I have two cats") e repetia a certa no final, o que fazia a fala trocar de voz PT→EN→PT→EN→PT→EN dentro da mesma resposta (confirmado via `curl` antes da correção). Reforcei o prompt pra "use aspas EXATAMENTE UMA vez por resposta", mas o modelo continuou sem obedecer à risca depois do teste — então a correção definitiva foi em `splitSpeechSegments` (`tts.ts`): em vez de confiar na disciplina do modelo, só a **última** aspas válida (mesma frase que `extractPracticePhrase` já escolhia) vira um segmento em inglês; qualquer aspas anterior (a forma errada, por exemplo) é achatada de volta no texto em português ao redor, sem criar um segmento novo. Isso garante no máximo **uma** troca de voz por resposta, independente de quantas vezes o modelo cite algo em inglês.
+  - **Trade-off assumido:** palavras ou frases em inglês citadas antes da frase-alvo (ex.: a forma errada do aluno) agora são lidas com a voz em português, com pronúncia errada pro inglês — preferível a múltiplas trocas de voz no meio de uma explicação, mas é uma perda de precisão nessas citações específicas.
+- **Testado via `curl` em `/api/chat` + `/api/speak` + `afplay`:** confirmado que a resposta de teste ("I has two cats") agora gera só 2 segmentos (`pt`, `en`) em vez de 6, e os dois áudios tocam em sequência sem a pausa anterior. `tsc --noEmit` limpo nos dois lados, build do frontend sem erros, `vite preview` já servindo o bundle novo sem precisar reiniciar.
+- **Não testado ainda no navegador** (extensão do Claude in Chrome não conectada nesta sessão) — falta confirmar ao vivo que a troca de voz única no fim da frase soa natural, não abrupta.
+
+### 2026-10-28 — Fase 11 planejada (motor Gemini, chave do próprio usuário)
+
+Pedido: usar a Gemini API pra deixar as respostas mais rápidas e naturais, sem custo centralizado — cada usuário cola a própria chave de API (gerada de graça no Google AI Studio) nas configurações do Papo Reto, no padrão "bring your own key". Descartamos a ideia de login OAuth com conta Gemini Pro/Enterprise: a assinatura do app Gemini não concede acesso de API pra terceiros, só a chave de desenvolvedor (gratuita ou paga) resolve.
+
+**Por que isso ataca a raiz dos problemas das Fases 09-10:** o Ollama local (Llama 3.1 8B, CPU, sem GPU) é lento (até 90s por resposta) e segue mal a instrução de "aspas uma vez" (causa da troca de voz excessiva corrigida na Fase 10 só na camada de segmentação, não na origem). Um modelo Gemini na nuvem deve ser bem mais rápido e obedecer melhor o formato — ataca os dois problemas na origem, não só mitiga.
+
+**Plano, em sub-fases:**
+
+1. **Configurações: campo pra colar a chave** — como o app é de usuário único (`profile` tem sempre `id=1` em `db.ts`), basta uma coluna nova (`gemini_api_key TEXT`, nullable) na tabela `profile` — sem necessidade de tabela separada ou multi-tenant. Tela de configurações (já existe o painel que troca Normal/Exigente) ganha um campo de texto (tipo senha, mascarado) pra colar a chave, com um aviso claro: "ao usar sua chave Gemini, suas conversas passam a ser processadas pelos servidores do Google, não só na sua máquina."
+2. **Campo de motor no perfil** — `profile.engine: "ollama" | "gemini"` (default `"ollama"`, preserva o comportamento 100% local pra quem não tem chave). Troca de motor no mesmo painel de configurações, ao lado do campo da chave; se escolher `"gemini"` sem chave preenchida, bloquear com aviso em vez de quebrar silenciosamente.
+3. **`agent.ts`: nova função `streamAgentGemini`** — mesma assinatura de `streamAgent` (history, mode, mood, onChunk), mas chamando a Gemini API (`@google/genai`, streaming) com a chave do usuário, reaproveitando os mesmos `BASE_PROMPT`/`MODE_PROMPT`/`MOOD_PROMPT` como `system_instruction` em vez de mensagem `role: "system"` (formato da Gemini é um pouco diferente do Ollama). `server.ts` escolhe qual função chamar baseado em `profile.engine`.
+4. **Fallback automático** — se a chamada à Gemini falhar (chave inválida, cota excedida, sem internet), `/api/chat` cai pro `streamAgent` (Ollama) nessa mesma requisição em vez de só devolver erro — preserva a promessa de "funciona local" mesmo com o motor cloud configurado.
+5. **Medir o ganho de verdade** — comparar, com a mesma frase de teste, o tempo de resposta e quantas vezes o Gemini cita aspas por resposta (via `curl`) contra os números já registrados do Ollama (Fase 08: até 90s; Fase 10: até 3 pares de aspas numa resposta só) — confirmar que a troca realmente resolve antes de assumir que resolveu.
+6. **TTS: avaliar o modelo de voz da própria Gemini** — pesquisar se um modelo de TTS da Gemini consegue ler português e inglês na mesma frase com uma única voz coerente (sem precisar alternar dois modelos Piper). Se a qualidade/latência compensar, usar a chave do usuário também pra síntese de voz, mantendo Piper como motor de voz padrão (grátis, local) pra quem não configurou a chave.
+7. **(Fase futura, não bloqueia esta)** — avaliar o Live API da Gemini (fala-para-fala nativa, streaming bidirecional por WebSocket) pra eliminar texto+TTS como dois passos separados; é um ganho maior de naturalidade, mas exige reescrever a arquitetura de transporte do front (WebSocket/WebRTC em vez de fetch+NDJSON) — fica registrado como direção futura, não faz parte do escopo inicial.
+
+**Riscos a monitorar:**
+- **Privacidade:** com o motor Gemini ativo, a conversa do aluno (incluindo erros e frases pessoais) sai da máquina e vai pros servidores do Google — precisa ficar visível pro usuário na UI, não só documentado aqui.
+- **Cota da camada gratuita:** mesmo de graça, tem limite de requisições por minuto/dia — o fallback da sub-fase 4 cobre isso, mas vale deixar uma mensagem clara quando cair pro Ollama por esse motivo, não um erro genérico.
+- **Chave em texto no SQLite local:** aceitável pra um app single-user na própria máquina do aluno, mas não deve nunca ser logada (`console.log`) nem devolvida inteira pelo `GET /api/profile` (mascarar, ex. mostrar só os 4 últimos caracteres).
+
+**Próximo passo:** sub-fase 1 (campo de configuração da chave) — sem ela, nada do resto tem como ser testado de verdade.
+
+### 2026-10-28 — Fase 11, sub-fases 1–4 implementadas
+
+- **`db.ts`:** migração via `ALTER TABLE` (não recriação) adiciona `engine` (default `'ollama'`) e `gemini_api_key` (nullable) na tabela `profile` existente — perfis já criados antes desta fase não se perdem.
+- **`agent.ts`:** novo `Engine = "ollama" | "gemini"`; nova `streamAgentGemini(history, mode, mood, apiKey, onChunk)` com a mesma assinatura de `streamAgent`, chamando `generativelanguage.googleapis.com/.../gemini-2.0-flash:streamGenerateContent?alt=sse` — reaproveita os mesmos `BASE_PROMPT`/`MODE_PROMPT`/`MOOD_PROMPT` como `system_instruction`, e mapeia `role: "assistant"` pra `"model"` (nome que a Gemini usa).
+- **`server.ts`:**
+  - `GET /api/profile` nunca devolve a chave crua — só `hasGeminiKey: boolean`.
+  - `POST /api/profile` aceita `engine`; se vier `"gemini"` sem chave já salva no banco, rejeita com 400 em vez de aceitar e quebrar silenciosamente no chat.
+  - Novo `POST /api/gemini-key` (`{ apiKey }`, vazio pra remover) — endpoint próprio, pra não correr o risco de o front reenviar o valor mascarado do GET e sobrescrever a chave real.
+  - `/api/chat`: se `profile.engine === "gemini"` e há chave salva, tenta `streamAgentGemini`; se falhar (chave inválida, cota, rede), emite um evento novo `{type:"engine-fallback", reason}` no NDJSON e completa a mesma resposta com `streamAgent` (Ollama) — sem chave ou com `engine:"ollama"`, usa Ollama direto, sem nenhum aviso.
+  - **Limitação conhecida, registrada no código:** se a Gemini já tiver mandado algum pedaço de texto antes de falhar no meio do stream, esse texto parcial já chegou no front antes do fallback — a resposta do Ollama entra "colada" nele. Não tratado ainda; a maioria das falhas reais (chave inválida, cota, sem rede) acontece antes do primeiro chunk.
+- **Front (`App.tsx`):** `Profile` ganhou `engine` e `hasGeminiKey`. Painel de configurações ganhou uma segunda linha (Ollama local / Gemini com sua chave — o botão Gemini fica desabilitado sem chave salva) e um campo pra colar/remover a chave, com aviso fixo de privacidade quando o motor Gemini está ativo. Novo evento `engine-fallback` do stream aparece como um aviso temporário acima do chat (reaproveitando o estilo de erro do microfone).
+- **Testado via `curl` em todo o ciclo:** `GET /api/profile` sem chave/com chave (nunca expõe o valor); `POST /api/profile` com `engine:"gemini"` sem chave rejeitado com 400; `POST /api/gemini-key` salvando e removendo; `POST /api/profile` com `engine:"gemini"` aceito depois de ter chave; `/api/chat` com uma chave fake confirmando o evento `engine-fallback` seguido da resposta completa via Ollama; `/api/chat` com `engine:"gemini"` e chave já removida usando Ollama direto, sem aviso. `tsc --noEmit` limpo nos dois lados, build do frontend sem erros, `vite preview` servindo o bundle novo.
+- **Não testado ainda:** uma chave Gemini real (não tenho uma) — então o ganho de velocidade e disciplina de aspas que motivou a fase ainda não foi confirmado na prática, só a infraestrutura em volta dela (storage, troca de motor, fallback). Também não testado no navegador (extensão do Claude in Chrome não conectada nesta sessão).
+
+**Próximo passo:** você colar sua própria chave do Google AI Studio no painel de configurações (⚙️ dentro do Chat) e testar uma conversa de verdade — aí a gente mede o tempo de resposta e confere se o Gemini realmente respeita a regra de "aspas uma vez" melhor que o Llama local (sub-fase 5 do plano).
+
+### 2026-10-28 — Fase 11, sub-fase 5: teste com chave real e dois bugs reais corrigidos
+
+Você passou sua chave de API real e testamos o motor Gemini de ponta a ponta pela primeira vez.
+
+- **Bug real nº1 — modelo descontinuado:** `agent.ts` tinha `GEMINI_MODEL = "gemini-2.0-flash"` fixo, mas esse modelo não existe mais — a própria API devolve 404 com a mensagem "This model models/gemini-2.0-flash is no longer available". **Corrigido:** troquei pra `"gemini-flash-latest"`, um alias que a Gemini mantém sempre apontando pro Flash vigente (hoje resolve pra `gemini-3.8-flash`) — protege contra a próxima descontinuação do mesmo tipo.
+- **Bug real nº2 — "thinking" consumindo tempo sem necessidade:** um teste manual (`curl` direto na API, fora do nosso backend) mostrou 261 tokens de raciocínio interno (`thoughtsTokenCount`) só pra responder "diga oi" — o modelo Flash mais novo pensa por padrão antes de responder, o que é desperdício de latência pra uma correção de gramática simples. **Corrigido:** `generationConfig.thinkingConfig.thinkingBudget: 0` na chamada.
+- **Achado real, não é bug nosso:** depois dessas duas correções, a chamada à Gemini (direta via `curl`, fora do nosso backend) alternou entre um **200 limpo** (confirmando que a chave funciona e a resposta vem certa) e **503 "This model is currently experiencing high demand"** ou timeout sem resposta — isso é instabilidade do lado do Google no tier gratuito do modelo Flash, não algo que o Papo Reto controla. Testado via `/api/chat` do nosso backend: nas duas tentativas que caíram nessa instabilidade, o **fallback pro Ollama (sub-fase 4) funcionou certinho** — emitiu `engine-fallback` e completou a resposta pelo motor local, sem travar nem devolver erro pro aluno.
+- **Ainda não medido:** como a instabilidade do Google impediu uma chamada completa via streaming pelo nosso backend nesta sessão, não dá pra confirmar ainda o ganho real de velocidade nem se o Gemini respeita melhor a regra de "aspas uma vez" (só confirmamos isso com um `generateContent` simples direto, fora do fluxo de correção de gramática completo). Fica pendente repetir o teste de velocidade/disciplina de aspas quando a demanda no lado do Google normalizar.
+- **Nota de segurança:** você colou a chave direto no chat — ela foi usada só pra configurar o `papo-reto.db` local (confirmei antes que esse arquivo está no `.gitignore` e nunca foi commitado) e não foi repetida nesta nota. Da próxima vez, cole direto no campo de configurações (⚙️) dentro do próprio app — vai direto pro backend local, sem passar pela conversa.
+
+**Próximo passo:** repetir o teste de `/api/chat` com o motor Gemini em outro momento (demanda do lado do Google costuma ser temporária, segundo a própria mensagem de erro) pra medir tempo de resposta de verdade e confirmar a disciplina de aspas; se a instabilidade persistir, vale reavaliar se o tier gratuito do Flash é confiável o suficiente pro uso diário ou se compensa manter o Ollama como padrão por enquanto.
+
+### 2026-10-28 — Instabilidade do Gemini confirmada com mais precisão
+
+Você relatou que o app continuou caindo no aviso "Gemini não respondeu". Isolei exatamente onde trava:
+
+- `GET /v1beta/models/gemini-flash-latest` (metadados do modelo, sem gerar texto) — responde normal, **200 em 0,77s**. Confirma que a chave e a autenticação estão certas.
+- `POST .../generateContent` (o que realmente gera a resposta) — trava completamente, **sem devolver nem erro**, até o timeout de 20s estourar do nosso lado.
+
+Ou seja: não é a chave, não é nosso código, não é nossa rede — é a capacidade de geração do Google sobrecarregada no tier gratuito agora mesmo, de um jeito que nem chega a devolver o 503 "alta demanda" de antes, só trava a conexão. É exatamente o risco que já tínhamos anotado no plano da Fase 11 ("cota da camada gratuita"), só que na prática virando indisponibilidade, não erro de cota.
+
+**O fallback está fazendo o trabalho dele:** o app nunca quebra pro aluno — só demora mais, porque cai pro Ollama local. Mas o ganho de velocidade que motivou a fase não está disponível agora, de fato.
+
+**Próximo passo:** por enquanto, recomendado deixar o motor em Ollama como padrão (`profile.engine = "ollama"`) e só tentar o Gemini de novo mais tarde, verificando antes com um teste rápido de `generateContent` se a demanda já normalizou — sem precisar trocar o motor no app pra descobrir isso só quando uma conversa real falhar.
+
+### 2026-10-28 — Fase 12 planejada (otimizar o motor Ollama)
+
+Pedido: já que o Gemini está instável agora, otimizar o motor local (Ollama) pra responder mais rápido e mais natural — sem depender da nuvem.
+
+**Achado novo que muda o diagnóstico de lentidão:** a máquina é um MacBook Air **M1 com 8GB de RAM total**, sem GPU discreta. O `llama3.1:8b` quantizado (Q4_K_M) já ocupa **4.9GB só de peso** — num total de 8GB compartilhado com todo o resto do macOS, Chrome e os processos Node do próprio app, isso é pressão de memória severa. É uma causa mais provável pra lentidão de até 90s (Fase 02/08) do que "falta de GPU" como o `HISTORICO.md` vinha assumindo — o Ollama no Apple Silicon já usa a GPU integrada (Metal) por padrão. Confirmei também com `ollama ps` que o modelo nem está carregado na memória agora (foi descarregado por inatividade) — a próxima mensagem vai pagar o custo de carregar os 4.9GB de novo, antes mesmo de começar a gerar.
+
+**Plano, em sub-fases — velocidade:**
+
+1. **Testar um modelo menor** — `llama3.2:3b` ou `qwen2.5:3b-instruct` (bom suporte a português) no lugar do 8B. Em Q4, ocupam ~2GB — cabem com folga nos 8GB de RAM dessa máquina, sem a pressão de memória que o 8B causa. Deve ganhar velocidade principalmente por isso, não só por ter menos parâmetros. Testar a qualidade da correção gramatical e a disciplina de aspas antes de trocar como padrão — se cair demais, considerar um meio-termo (`phi3.5:3.8b`).
+2. **Manter o modelo "quente" (`keep_alive`)** — o Ollama descarrega o modelo depois de alguns minutos sem uso (confirmado agora com `ollama ps` vazio); a próxima mensagem depois de uma pausa paga o carregamento inteiro de novo. Passar `keep_alive: "15m"` na chamada evita isso pro padrão de uso de um app de conversação (mensagens espaçadas).
+3. **Limitar o tamanho da resposta (`num_predict`)** — hoje não há limite; um cap de ~150-200 tokens evita o modelo divagar além do necessário pra uma correção + frase de prática, economizando tempo de geração e de TTS depois.
+4. **Reduzir o histórico enviado (`HISTORY_LIMIT`, hoje 20)** — cada mensagem extra no histórico é processamento de prompt antes de começar a gerar. Testar se 8-10 mensagens bastam sem perda perceptível de contexto da conversa.
+5. **Medir antes/depois de cada mudança** — mesmo método usado no teste do Gemini (tempo de resposta via `curl`), não assumir que uma mudança ajudou sem medir.
+
+**Plano, em sub-fases — naturalidade:**
+
+6. **Parar de forçar uma frase entre aspas em TODA resposta** — hoje o prompt (`BASE_PROMPT`) exige exatamente uma frase em inglês entre aspas em toda resposta, mesmo quando o aluno não cometeu erro nenhum. Isso faz a conversa parecer um exercício de repetição forçado, não um bate-papo — um professor de verdade não manda repetir uma frase depois de cada coisa que você diz. Mudar a regra: só gerar a frase de prática quando houver uma correção real; sem erro, o agente responde livre em português, sem aspas. Bônus: menos respostas com aspas = menos trocas de voz na fala (reforça o que a Fase 10 já mitigou).
+7. **Variar a abertura das correções** — os testes desta sessão mostraram a mesma frase ("Não acredito! Você fez o mesmo erro novamente!") aparecendo quase toda vez — soa como um template fixo, não uma reação de verdade. Dar ao modelo um leque de reações no prompt, ou pedir explicitamente pra variar a abertura.
+8. **Respostas mais curtas por padrão** — pedir 1-2 frases de explicação, não um parágrafo — mais parecido com bate-papo real, e de bônus ajuda a velocidade (menos tokens pra gerar e sintetizar).
+9. **Few-shot no prompt** — 1-2 exemplos curtos de pergunta→resposta ideal direto no `BASE_PROMPT` (aspas só quando há erro, resposta curta, tom variado) — modelos pequenos seguem exemplo concreto melhor que instrução abstrata, o que ajuda tanto o 8B atual quanto um modelo menor se o item 1 for adotado.
+10. **Re-medir a disciplina de aspas** — repetir o teste desta sessão (mandar um erro de propósito, contar pares de aspas) depois dessas mudanças, pra confirmar que melhorou de verdade.
+
+**Riscos a monitorar:**
+- Modelo menor pode piorar a qualidade da correção gramatical ou o português — testar antes de trocar como padrão.
+- `keep_alive` alto mantém RAM ocupada o tempo todo mesmo sem uso — numa máquina de 8GB isso pode deixar outros apps lentos entre conversas; usar um valor moderado (10-15 min), não infinito.
+- Histórico menor pode fazer o agente "esquecer" contexto em conversas longas — testar com 15+ mensagens antes de confirmar que 8-10 basta.
+
+**Próximo passo:** sub-fase 1 (testar modelo menor) e sub-fase 6 (parar de forçar aspas em toda resposta) são as de maior impacto — uma ataca velocidade na raiz (pressão de memória), a outra ataca naturalidade na raiz (estrutura de drill forçado). Recomendo começar por essas duas antes das demais.
+
+### 2026-10-28 — Fase 12 executada: velocidade de até 90s pra menos de 2s
+
+- **Modelo trocado:** `llama3.1:8b` → `qwen2.5:3b-instruct`. Testei dois candidatos de 3B (`llama3.2:3b` e `qwen2.5:3b-instruct`) com frases de erro que **não** estavam no few-shot do prompt ("Yesterday I go to the beach", "I am agree with you") — o `llama3.2:3b` não pegou nenhuma das duas, o `qwen2.5:3b-instruct` pegou uma. Nenhum é perfeito, mas o `qwen2.5` foi melhor nessa amostra pequena e igualmente rápido — virou o padrão.
+- **`keep_alive: "15m"`** e **`num_predict: 220`** adicionados na chamada ao Ollama (`agent.ts`); **`HISTORY_LIMIT`** de 20 → 10 mensagens (`server.ts`).
+- **Prompt reescrito (`BASE_PROMPT`/`MODE_PROMPT`):** só gera a frase entre aspas quando há uma correção de verdade — antes, toda resposta (mesmo "oi, tudo bem?") vinha com uma frase pra repetir, o que soava como um exercício forçado. Também pedi pra variar a abertura das correções (antes repetia "Não acredito! Você fez o mesmo erro de novo!" quase sempre) e respostas mais curtas (1-2 frases), com dois exemplos few-shot direto no prompt.
+- **Medido via `/api/chat` real (não só a chamada crua ao Ollama), com histórico de conversa limpo:**
+  - Mensagem com erro óbvio ("I has two cats"): **1.66s** de ponta a ponta (mood + geração + segmentação + streak), aspas única, frase certa.
+  - Mensagem sem erro ("What did you do this weekend?"): **0.76s**, sem aspas nenhuma, resposta natural em português.
+  - Antes desta fase: até 90s por resposta (Fase 02/08) com o `llama3.1:8b`.
+- **Causa raiz confirmada:** a máquina é um MacBook Air M1 com só 8GB de RAM — o 8B em Q4 ocupava 4.9GB só de peso, pressão de memória severa. Um modelo de ~2GB cabe com folga, e combinado com `keep_alive` manter o modelo carregado entre mensagens, o ganho foi muito maior do que "menos parâmetros" sozinho explicaria.
+- **Bug real encontrado e corrigido durante o teste:** a tabela `messages` estava poluída com dezenas de mensagens dos meus próprios testes de API nesta sessão — isso inflava a contagem de mensagens do usuário e empurrava o `mood` pra "no_limite" sem motivo real, e numa chamada chegou a fazer o modelo citar a frase **errada** como "frase de prática" (confusão de contexto, não bug de código). Pedi autorização e limpei a tabela `messages` (não afeta streak, progresso de lições nem a lista de erros revisados, que vivem em tabelas separadas) antes de medir de novo — os números acima já são com o histórico limpo.
+- **Risco real, não resolvido, registrado como limitação conhecida:** a mudança de "só corrigir quando há erro" (pedida pra soar mais natural) depende do modelo *perceber* o erro — e nos testes, tanto o `llama3.2:3b` quanto o `qwen2.5:3b` **deixaram passar erros reais** de vez em quando (ex. "I am agree with you", sujeito+verbo errado, não foi corrigido por nenhum dos dois na minha amostra). O prompt antigo (forçava uma correção em toda resposta) evitava esse "erro passa batido" à força, mas custava a sensação de bate-papo real que motivou essa fase. Isso é uma troca pedagógica de verdade — vale observar no uso real se o aluno sente que erros estão passando sem correção, e se vale a pena reconsiderar.
+
+**Próximo passo:** usar o app normalmente por alguns dias com o motor Ollama/qwen2.5 e observar dois pontos: (1) se a velocidade se mantém boa fora de testes isolados, com conversas mais longas; (2) se a taxa de "erros que passam batido" (risco acima) incomoda na prática — se incomodar, dá pra reavaliar entre voltar a forçar correção sempre (mais chato, mas não deixa passar nada) ou aceitar que, como numa conversa real, nem todo erro vira correção na hora.

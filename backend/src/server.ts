@@ -2,33 +2,71 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { PassThrough } from "node:stream";
 import { db } from "./db.js";
-import { streamAgent, nextMood, type ChatMessage, type Mode } from "./agent.js";
+import { streamAgent, streamAgentGemini, nextMood, type ChatMessage, type Mode, type Engine } from "./agent.js";
 import { curriculum, quiz, scoreQuiz } from "./content.js";
-import { synthesizeSpeech, extractPracticePhrase } from "./tts.js";
+import { synthesizeSpeech, extractPracticePhrase, splitSpeechSegments, type SpeechLang } from "./tts.js";
 import { touchStreak, computeCurrentStreak, weekCount } from "./streak.js";
 import { estimatePracticeMinutes } from "./stats.js";
 
 const app = Fastify();
 await app.register(cors, { origin: true });
 
-const HISTORY_LIMIT = 20;
+// Fase 12: era 20 — cada mensagem extra no histórico é processamento de prompt antes
+// do modelo começar a gerar qualquer coisa. 10 (5 trocas) ainda dá contexto de sobra
+// pra uma conversa de correção de inglês, que não depende de memória de longo prazo.
+const HISTORY_LIMIT = 10;
 
-type Profile = { id: 1; name: string; goal: string; level: string; mode: Mode };
+type Profile = {
+  id: 1;
+  name: string;
+  goal: string;
+  level: string;
+  mode: Mode;
+  engine: Engine;
+  gemini_api_key: string | null;
+};
 
 app.get("/api/health", async () => ({ ok: true }));
 
+// Fase 11: a chave do Gemini nunca sai inteira do backend — o front só recebe
+// hasGeminiKey (booleano) pra saber se já tem uma configurada.
 app.get("/api/profile", async () => {
   const profile = db.prepare("SELECT * FROM profile WHERE id = 1").get() as Profile | undefined;
-  return { profile: profile ?? null };
+  if (!profile) return { profile: null };
+  const { gemini_api_key, ...rest } = profile;
+  return { profile: { ...rest, hasGeminiKey: !!gemini_api_key } };
 });
 
-app.post<{ Body: Omit<Profile, "id"> }>("/api/profile", async (request) => {
+app.post<{ Body: Omit<Profile, "id" | "gemini_api_key"> }>("/api/profile", async (request, reply) => {
   const { name, goal, level, mode } = request.body;
+  const engine: Engine = request.body.engine ?? "ollama";
+
+  if (engine === "gemini") {
+    const existing = db.prepare("SELECT gemini_api_key FROM profile WHERE id = 1").get() as
+      | { gemini_api_key: string | null }
+      | undefined;
+    if (!existing?.gemini_api_key) {
+      return reply.code(400).send({ error: "Configure uma chave Gemini antes de escolher esse motor." });
+    }
+  }
+
   db.prepare(
-    `INSERT INTO profile (id, name, goal, level, mode) VALUES (1, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET name = ?, goal = ?, level = ?, mode = ?`
-  ).run(name, goal, level, mode, name, goal, level, mode);
+    `INSERT INTO profile (id, name, goal, level, mode, engine) VALUES (1, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = ?, goal = ?, level = ?, mode = ?, engine = ?`
+  ).run(name, goal, level, mode, engine, name, goal, level, mode, engine);
   return { ok: true };
+});
+
+// Fase 11: endpoint próprio pra chave — evita o problema de mascarar o valor no GET e
+// acidentalmente sobrescrever a chave real com o valor mascarado num POST seguinte.
+app.post<{ Body: { apiKey: string } }>("/api/gemini-key", async (request, reply) => {
+  const profile = db.prepare("SELECT id FROM profile WHERE id = 1").get();
+  if (!profile) {
+    return reply.code(400).send({ error: "Complete o onboarding antes de configurar a chave." });
+  }
+  const apiKey = request.body.apiKey.trim() || null;
+  db.prepare("UPDATE profile SET gemini_api_key = ? WHERE id = 1").run(apiKey);
+  return { ok: true, hasGeminiKey: !!apiKey };
 });
 
 app.get("/api/placement-quiz", async () => ({
@@ -119,9 +157,10 @@ function normalizeForCompare(s: string): string {
 // parada esse tempo todo sem nenhum feedback. Cada linha é um evento:
 //   {type:"mood", mood}              — enviado assim que o humor é calculado
 //   {type:"chunk", text}             — pedaço de texto conforme o modelo gera
-//   {type:"done", practicePhrase, streak} — metadados que só existem com a resposta completa
-//   {type:"error", error}            — Ollama falhou (headers HTTP já foram enviados como 200,
-//                                       então o erro vai dentro do stream, não como status code)
+//   {type:"engine-fallback", reason} — Gemini falhou nessa requisição, caiu pro Ollama local
+//   {type:"done", practicePhrase, segments, streak} — metadados da resposta completa
+//   {type:"error", error}            — nenhum motor respondeu (headers HTTP já foram
+//                                       enviados como 200, então o erro vai no stream)
 app.post<{ Body: { text: string } }>("/api/chat", async (request, reply) => {
   const { text } = request.body;
 
@@ -147,14 +186,35 @@ app.post<{ Body: { text: string } }>("/api/chat", async (request, reply) => {
   reply.type("application/x-ndjson").send(stream);
   stream.write(JSON.stringify({ type: "mood", mood }) + "\n");
 
+  const onChunk = (delta: string) => stream.write(JSON.stringify({ type: "chunk", text: delta }) + "\n");
+
   let answer = "";
   try {
-    answer = await streamAgent(history, profile.mode, mood, (delta) => {
-      stream.write(JSON.stringify({ type: "chunk", text: delta }) + "\n");
-    });
+    if (profile.engine === "gemini" && profile.gemini_api_key) {
+      try {
+        answer = await streamAgentGemini(history, profile.mode, mood, profile.gemini_api_key, onChunk);
+      } catch {
+        // Fase 11: chave inválida, cota excedida ou sem internet — cai pro Ollama local
+        // na mesma requisição em vez de simplesmente falhar, preservando a promessa de
+        // "funciona local" mesmo com o motor cloud configurado.
+        //
+        // Limitação conhecida: se o Gemini já tiver mandado algum pedaço de texto antes
+        // de falhar no meio do stream, esses pedaços já chegaram no front — o fallback
+        // começa a resposta do Ollama "colada" neles, podendo ficar com um corte visível.
+        // Não tratamos esse caso ainda; na prática a maioria das falhas (chave inválida,
+        // cota, rede) acontece antes do primeiro chunk.
+        stream.write(
+          JSON.stringify({ type: "engine-fallback", reason: "Gemini não respondeu — usando o motor local." }) + "\n"
+        );
+        answer = await streamAgent(history, profile.mode, mood, onChunk);
+      }
+    } else {
+      answer = await streamAgent(history, profile.mode, mood, onChunk);
+    }
   } catch {
     stream.write(
-      JSON.stringify({ type: "error", error: "O Ollama não respondeu. Ele está rodando (`ollama serve`)?" }) + "\n"
+      JSON.stringify({ type: "error", error: "Nenhum motor respondeu. O Ollama está rodando (`ollama serve`)?" }) +
+        "\n"
     );
     stream.end();
     return;
@@ -169,13 +229,17 @@ app.post<{ Body: { text: string } }>("/api/chat", async (request, reply) => {
 
   const streak = touchStreak();
 
-  stream.write(JSON.stringify({ type: "done", practicePhrase, streak }) + "\n");
+  // Fase 10: segments ordena a resposta inteira em PT/EN (não só a frase de prática)
+  // pro front tocar a professora falando tudo, trocando de voz entre os trechos.
+  const segments = splitSpeechSegments(answer);
+
+  stream.write(JSON.stringify({ type: "done", practicePhrase, segments, streak }) + "\n");
   stream.end();
 });
 
-app.post<{ Body: { text: string } }>("/api/speak", async (request, reply) => {
+app.post<{ Body: { text: string; lang?: SpeechLang } }>("/api/speak", async (request, reply) => {
   try {
-    const audio = await synthesizeSpeech(request.body.text);
+    const audio = await synthesizeSpeech(request.body.text, request.body.lang ?? "pt");
     reply.type("audio/wav").send(audio);
   } catch {
     reply.code(503).send({ error: "O Piper não conseguiu gerar o áudio." });

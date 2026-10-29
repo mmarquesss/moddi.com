@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
-import { feedbackFor, scoreAttempt, useSpeech } from "./useSpeech";
+import { feedbackFor, scoreAttempt, useSpeech, type SpeechSegment } from "./useSpeech";
 import Avatar from "./Avatar";
 import Confetti from "./Confetti";
 import { API_URL } from "./api";
 
 type Mode = "normal" | "brava";
 type MoodState = "calmo" | "atento" | "no_limite";
-type Profile = { name: string; goal: string; level: string; mode: Mode };
-type Message = { author: "user" | "agent"; text: string; practicePhrase?: string | null };
+type Engine = "ollama" | "gemini";
+type Profile = { name: string; goal: string; level: string; mode: Mode; engine: Engine; hasGeminiKey: boolean };
+type Message = {
+  author: "user" | "agent";
+  text: string;
+  practicePhrase?: string | null;
+  segments?: SpeechSegment[] | null;
+};
 type QuizQuestion = { id: string; level: string; text: string; options: string[] };
 type Lesson = {
   id: string;
@@ -250,7 +256,11 @@ function Onboarding({ onDone }: { onDone: (p: Profile) => void }) {
     );
   }
 
-  return <PlacementQuiz onDone={(level) => onDone({ name, goal, mode, level })} />;
+  return (
+    <PlacementQuiz
+      onDone={(level) => onDone({ name, goal, mode, level, engine: "ollama", hasGeminiKey: false })}
+    />
+  );
 }
 
 function PlacementQuiz({ onDone }: { onDone: (level: string) => void }) {
@@ -433,8 +443,11 @@ function Chat({
   const [voiceOn, setVoiceOn] = useState(true);
   const [mood, setMood] = useState<MoodState>("calmo");
   const [celebrating, setCelebrating] = useState(false);
+  const [geminiKeyInput, setGeminiKeyInput] = useState("");
+  const [engineError, setEngineError] = useState<string | null>(null);
+  const [engineNotice, setEngineNotice] = useState<string | null>(null);
 
-  const { supported: speechSupported, listening, error: micError, listen, speak } = useSpeech();
+  const { supported: speechSupported, listening, error: micError, listen, speakSegments } = useSpeech();
   const lastSpoken = useRef(-1);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -452,10 +465,10 @@ function Chat({
   useEffect(() => {
     const lastIndex = messages.length - 1;
     const last = messages[lastIndex];
-    // Só a frase de prática (inglês) é falada em voz alta — o resto da resposta
-    // é texto de apoio em português, sem áudio (regra de idioma da Fase 05).
-    if (voiceOn && last?.author === "agent" && last.practicePhrase && lastIndex > lastSpoken.current) {
-      speak(last.practicePhrase);
+    // Fase 10: fala a resposta inteira (explicação em português + frase de prática em
+    // inglês), um segmento por vez, em vez de só a frase de prática isolada.
+    if (voiceOn && last?.author === "agent" && last.segments?.length && lastIndex > lastSpoken.current) {
+      speakSegments(last.segments);
       lastSpoken.current = lastIndex;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -495,6 +508,7 @@ function Chat({
     const text = (overrideText ?? input).trim();
     if (!text || sending) return;
 
+    setEngineNotice(null);
     setMessages((m) => [...m, { author: "user", text }]);
     setInput("");
     setSending(true);
@@ -528,13 +542,15 @@ function Chat({
 
           if (event.type === "mood") {
             setMood(event.mood);
+          } else if (event.type === "engine-fallback") {
+            setEngineNotice(event.reason);
           } else if (event.type === "chunk") {
             full += event.text;
             updateLastAgentMessage({ text: full });
           } else if (event.type === "error") {
             updateLastAgentMessage({ text: event.error });
           } else if (event.type === "done") {
-            updateLastAgentMessage({ practicePhrase: event.practicePhrase });
+            updateLastAgentMessage({ practicePhrase: event.practicePhrase, segments: event.segments });
             if (event.streak) {
               onStreakUpdate(event.streak);
               if (event.streak.isNewDay) {
@@ -562,6 +578,62 @@ function Chat({
     });
   }
 
+  // Fase 11: ao contrário de changeMode, trocar de motor pode ser rejeitado pelo backend
+  // (ex.: escolher Gemini sem chave configurada) — por isso só atualiza o estado local
+  // depois de confirmar que o backend aceitou, em vez de aplicar e já seguir em frente.
+  async function changeEngine(engine: Engine) {
+    const updated = { ...profile, engine };
+    const res = await fetch(`${API_URL}/api/profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setEngineError(data.error ?? "Não foi possível trocar o motor.");
+      return;
+    }
+    setEngineError(null);
+    onProfileChange(updated);
+  }
+
+  async function saveGeminiKey() {
+    const apiKey = geminiKeyInput.trim();
+    if (!apiKey) return;
+    const res = await fetch(`${API_URL}/api/gemini-key`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey }),
+    });
+    if (res.ok) {
+      setGeminiKeyInput("");
+      setEngineError(null);
+      onProfileChange({ ...profile, hasGeminiKey: true });
+    }
+  }
+
+  async function removeGeminiKey() {
+    await fetch(`${API_URL}/api/gemini-key`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "" }),
+    });
+
+    // Sem chave, "gemini" não é mais uma escolha válida de motor — volta pro Ollama
+    // local e persiste isso no backend, pra não deixar profile.engine inconsistente
+    // com a ausência da chave (o POST /api/profile rejeitaria "gemini" sem chave de
+    // qualquer forma, então é melhor já corrigir aqui).
+    const nextEngine: Engine = profile.engine === "gemini" ? "ollama" : profile.engine;
+    if (nextEngine !== profile.engine) {
+      await fetch(`${API_URL}/api/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...profile, engine: nextEngine }),
+      });
+    }
+    onProfileChange({ ...profile, hasGeminiKey: false, engine: nextEngine });
+  }
+
   return (
     <div className="chat">
       {celebrating && <Confetti />}
@@ -579,14 +651,61 @@ function Chat({
 
       {showSettings && (
         <div className="settings-panel">
-          <button className={profile.mode === "normal" ? "picked" : ""} onClick={() => changeMode("normal")}>
-            Normal
-          </button>
-          <button className={profile.mode === "brava" ? "picked" : ""} onClick={() => changeMode("brava")}>
-            Exigente
-          </button>
+          <div className="settings-group">
+            <button className={profile.mode === "normal" ? "picked" : ""} onClick={() => changeMode("normal")}>
+              Normal
+            </button>
+            <button className={profile.mode === "brava" ? "picked" : ""} onClick={() => changeMode("brava")}>
+              Exigente
+            </button>
+          </div>
+
+          <div className="settings-group">
+            <button className={profile.engine === "ollama" ? "picked" : ""} onClick={() => changeEngine("ollama")}>
+              🖥️ Ollama (local)
+            </button>
+            <button
+              className={profile.engine === "gemini" ? "picked" : ""}
+              onClick={() => changeEngine("gemini")}
+              disabled={!profile.hasGeminiKey}
+              title={profile.hasGeminiKey ? "" : "Configure sua chave Gemini abaixo primeiro"}
+            >
+              ✨ Gemini (sua chave)
+            </button>
+          </div>
+
+          <div className="settings-key">
+            {profile.hasGeminiKey ? (
+              <>
+                <span className="key-status">✓ Chave Gemini configurada</span>
+                <button type="button" onClick={removeGeminiKey}>
+                  Remover
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  type="password"
+                  value={geminiKeyInput}
+                  onChange={(e) => setGeminiKeyInput(e.target.value)}
+                  placeholder="Cole sua chave Gemini (Google AI Studio)"
+                />
+                <button type="button" onClick={saveGeminiKey} disabled={!geminiKeyInput.trim()}>
+                  Salvar
+                </button>
+              </>
+            )}
+          </div>
+          {engineError && <p className="mic-error">{engineError}</p>}
+          {profile.engine === "gemini" && (
+            <p className="engine-warning">
+              ⚠️ Com o motor Gemini, suas conversas são processadas pelos servidores do Google, não só na sua
+              máquina.
+            </p>
+          )}
         </div>
       )}
+      {engineNotice && <p className="mic-error">{engineNotice}</p>}
 
       <div className="stage">
         <Avatar mood={mood} />
