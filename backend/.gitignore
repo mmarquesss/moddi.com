@@ -1,0 +1,8 @@
+node_modules
+papo-reto.db
+.tts-cache
+*.log
+
+# Modelo de voz do Piper (~60MB) — baixado pelo setup, não precisa ir pro git.
+# Ver README.md na raiz do projeto pra instruções de download.
+voices/*.onnx

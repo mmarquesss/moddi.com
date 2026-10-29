@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "levels": [
+    {
+      "level": "A1",
+      "title": "Fundamentos",
+      "lessons": [
+        {
+          "id": "a1-apresentacao",
+          "topic": "Apresentação pessoal",
+          "objectives": ["Falar seu nome e de onde você é", "Usar o verbo \"to be\" no presente"],
+          "vocabulary": ["name", "from", "nice to meet you"],
+          "starter": "Hi! Let's practice. Tell me your name and where you're from."
+        },
+        {
+          "id": "a1-rotina",
+          "topic": "Rotina diária",
+          "objectives": ["Descrever sua rotina com presente simples"],
+          "vocabulary": ["wake up", "go to work", "every day"],
+          "starter": "Let's talk about your daily routine. What time do you wake up?"
+        }
+      ]
+    },
+    {
+      "level": "A2",
+      "title": "Passado e planos",
+      "lessons": [
+        {
+          "id": "a2-fimdesemana",
+          "topic": "O que você fez",
+          "objectives": ["Contar eventos passados com passado simples"],
+          "vocabulary": ["yesterday", "last weekend", "went", "did"],
+          "starter": "What did you do last weekend?"
+        },
+        {
+          "id": "a2-viagem",
+          "topic": "Planos de viagem",
+          "objectives": ["Falar sobre planos futuros com \"going to\""],
+          "vocabulary": ["going to", "next month", "trip"],
+          "starter": "Tell me about a trip you're planning. Where are you going to go?"
+        }
+      ]
+    },
+    {
+      "level": "B1",
+      "title": "Opiniões e histórias",
+      "lessons": [
+        {
+          "id": "b1-opiniao",
+          "topic": "Dar sua opinião",
+          "objectives": ["Expressar opinião e justificar com \"because\""],
+          "vocabulary": ["I think", "in my opinion", "because"],
+          "starter": "What's your opinion about working from home? Why?"
+        },
+        {
+          "id": "b1-condicional",
+          "topic": "Hipóteses",
+          "objectives": ["Usar condicional tipo 1 e 2 (if clauses)"],
+          "vocabulary": ["if I had", "if I were", "would"],
+          "starter": "If you had an extra week of vacation, what would you do?"
+        }
+      ]
+    },
+    {
+      "level": "B2",
+      "title": "Debate e nuance",
+      "lessons": [
+        {
+          "id": "b2-debate",
+          "topic": "Defender um ponto de vista",
+          "objectives": ["Argumentar e contra-argumentar", "Usar phrasal verbs comuns"],
+          "vocabulary": ["on the other hand", "point out", "bring up"],
+          "starter": "Some people say remote work hurts teamwork. Do you agree or disagree? Convince me."
+        },
+        {
+          "id": "b2-phrasalverbs",
+          "topic": "Phrasal verbs no dia a dia",
+          "objectives": ["Usar phrasal verbs em contexto real"],
+          "vocabulary": ["figure out", "come up with", "get along with"],
+          "starter": "Tell me about a problem you had to figure out recently."
+        }
+      ]
+    },
+    {
+      "level": "C1",
+      "title": "Fluência e registro",
+      "lessons": [
+        {
+          "id": "c1-formal",
+          "topic": "Registro formal vs. informal",
+          "objectives": ["Adaptar o tom da fala para contextos formais e informais"],
+          "vocabulary": ["I would appreciate", "no worries", "could you possibly"],
+          "starter": "Pretend you're asking your boss for a day off, then ask a close friend the same thing. Show me both."
+        },
+        {
+          "id": "c1-idiomas",
+          "topic": "Idioms e naturalidade",
+          "objectives": ["Usar expressões idiomáticas com naturalidade"],
+          "vocabulary": ["hit the nail on the head", "under the weather", "piece of cake"],
+          "starter": "Tell me about something that was a piece of cake for you, and something that gave you a hard time."
+        }
+      ]
+    }
+  ]
+}

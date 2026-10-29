@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "questions": [
+    { "id": "q1", "level": "A1", "text": "She ___ a doctor.", "options": ["is", "are", "am", "be"], "answer": "is" },
+    { "id": "q2", "level": "A1", "text": "I ___ to school every day.", "options": ["go", "goes", "going", "gone"], "answer": "go" },
+    { "id": "q3", "level": "A2", "text": "Yesterday, I ___ to the cinema.", "options": ["go", "goed", "went", "going"], "answer": "went" },
+    { "id": "q4", "level": "A2", "text": "They ___ finished the project yet.", "options": ["isn't", "haven't", "hasn't", "don't"], "answer": "haven't" },
+    { "id": "q5", "level": "B1", "text": "If I ___ more time, I would travel more.", "options": ["have", "had", "has", "having"], "answer": "had" },
+    { "id": "q6", "level": "B1", "text": "She said she ___ call me later.", "options": ["will", "would", "is going to", "can"], "answer": "would" },
+    { "id": "q7", "level": "B2", "text": "By the time we arrived, the movie ___ already started.", "options": ["has", "had", "was", "is"], "answer": "had" },
+    { "id": "q8", "level": "B2", "text": "I wish I ___ harder for the exam.", "options": ["study", "studied", "had studied", "have studied"], "answer": "had studied" },
+    { "id": "q9", "level": "C1", "text": "Hardly ___ left the house when it started raining.", "options": ["I had", "had I", "I have", "have I"], "answer": "had I" },
+    { "id": "q10", "level": "C1", "text": "He really put his foot ___ it when he mentioned her ex.", "options": ["in", "on", "down", "up"], "answer": "in" }
+  ]
+}
