@@ -2,10 +2,12 @@ type MoodState = "calmo" | "atento" | "no_limite";
 
 // Fase 05: avatar minimalista (só olhos e boca) que reage ao `mood` da sessão —
 // o mesmo calmo/atento/no_limite que o backend já calcula desde a Fase 02.
+// Fase 14: cores ajustadas pra ler bem no fundo escuro (antes eram tons escuros
+// pensados pra fundo claro) — mesma lógica de humor, paleta neon nova.
 const EXPRESSIONS: Record<MoodState, { eyeRy: number; eyeTilt: number; mouth: string; color: string }> = {
-  calmo: { eyeRy: 11, eyeTilt: 0, mouth: "M 60,96 Q 100,114 140,96", color: "#2e7d6b" },
-  atento: { eyeRy: 6, eyeTilt: 8, mouth: "M 62,100 L 138,100", color: "#c9892f" },
-  no_limite: { eyeRy: 4, eyeTilt: 18, mouth: "M 62,106 Q 100,90 138,106", color: "#a6431b" },
+  calmo: { eyeRy: 11, eyeTilt: 0, mouth: "M 60,96 Q 100,114 140,96", color: "#4fd6b5" },
+  atento: { eyeRy: 6, eyeTilt: 8, mouth: "M 62,100 L 138,100", color: "#ffb74d" },
+  no_limite: { eyeRy: 4, eyeTilt: 18, mouth: "M 62,106 Q 100,90 138,106", color: "#ff5c5c" },
 };
 
 export default function Avatar({ mood }: { mood: MoodState }) {

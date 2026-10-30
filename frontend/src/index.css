@@ -1,27 +1,45 @@
-/* Papo Reto — tokens de design. App é light-only por decisão (Fase 04): sem tema
-   escuro ainda, então não seguimos prefers-color-scheme aqui. */
+/* Papo Reto — tokens de design. Fase 14 (2026-10-30): trocado de light-only (decisão
+   da Fase 04) pra dark-only — visual "neon noturno" pedido pelo usuário. Dark-only,
+   não um toggle: um único tema pra manter, sem dobrar os tokens de cor nem testar
+   duas versões de cada tela.
+   --brand (#5C6BC0, indigo) é a cor de interação primária (botões, bordas ativas);
+   --brand-light é a mesma família de cor só que clara o bastante pra texto em cima
+   de fundo escuro (contraste ~6.9:1) — nunca usar --brand-dark como COR DE TEXTO,
+   ele é escuro de propósito pra servir de hover de fundo (contraste de texto branco
+   em cima dele, ~7.5:1).
+   --success (#00C853, emerald) marca correção/acerto — usado como borda/texto/glow,
+   nunca como fundo sólido com texto branco em cima (contraste insuficiente, ~2.2:1
+   medido). --danger é só texto/alerta (contraste ~6:1 no fundo escuro); --danger-strong
+   é a versão pra fundo sólido com texto branco (ex. botão de mic gravando). */
 :root {
-  --bg: #eef2f0;
-  --surface: #ffffff;
-  --surface-alt: #f3f6f4;
-  --border: #e3e8e5;
-  --text: #1f2624;
-  --text-muted: #6b7470;
-  --brand: #2e6b5a;
-  --brand-dark: #234f42;
-  --brand-bg: #e6f1ec;
-  --danger: #b42318;
+  --bg: #0f172a;
+  --bg-gradient: linear-gradient(160deg, #0f172a 0%, #141f38 45%, #0b1220 100%);
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-alt: rgba(255, 255, 255, 0.07);
+  --border: rgba(92, 107, 192, 0.28);
+  --text: #e0e0e0;
+  --text-muted: #b0bec5;
+  --brand: #5c6bc0;
+  --brand-light: #8e9cde;
+  --brand-dark: #434f94;
+  --brand-bg: rgba(92, 107, 192, 0.16);
+  --success: #00c853;
+  --success-bg: rgba(0, 200, 83, 0.14);
+  --danger: #ff5c5c;
+  --danger-strong: #c62828;
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 22px;
-  --shadow-card: 0 1px 2px rgba(16, 24, 21, 0.04), 0 8px 24px rgba(16, 24, 21, 0.06);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(92, 107, 192, 0.12);
+  --glow-brand: 0 0 20px rgba(92, 107, 192, 0.5);
+  --glow-success: 0 0 20px rgba(0, 200, 83, 0.5);
 
   --sans: -apple-system, "Segoe UI", Inter, Roboto, system-ui, sans-serif;
 
   font: 16px/1.5 var(--sans);
-  color-scheme: light;
+  color-scheme: dark;
   color: var(--text);
-  background: var(--bg);
+  background: var(--bg-gradient);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -38,7 +56,9 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  min-height: 100svh;
+  background: var(--bg-gradient);
+  background-attachment: fixed;
 }
 
 h1,

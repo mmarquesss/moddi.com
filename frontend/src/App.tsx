@@ -27,6 +27,28 @@ type Lesson = {
 type LevelGroup = { level: string; title: string; lessons: Lesson[] };
 type Streak = { current: number; weekCount: number };
 
+// Fase 14: destaca a frase de prática (a correção entre aspas) como um "cartão"
+// emerald dentro da bolha, em vez de deixar ela se perder no meio do texto em
+// português — mesma ideia de extractPracticePhrase do backend, só que aqui é pra
+// estilo visual, não pra escolher o áudio.
+function renderBubbleText(text: string, practicePhrase?: string | null) {
+  if (!practicePhrase) return text;
+
+  const match = [...text.matchAll(/["“]([^"”]+)["”]/g)].find((m) => m[1].trim() === practicePhrase.trim());
+  if (!match || match.index === undefined) return text;
+
+  const before = text.slice(0, match.index);
+  const after = text.slice(match.index + match[0].length);
+
+  return (
+    <>
+      {before}
+      <span className="practice-phrase">{match[1]}</span>
+      {after}
+    </>
+  );
+}
+
 export default function App() {
   const [profile, setProfile] = useState<Profile | null | "loading">("loading");
   const [tab, setTab] = useState<"chat" | "trilha" | "revisao" | "progresso">("chat");
@@ -446,6 +468,7 @@ function Chat({
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [engineError, setEngineError] = useState<string | null>(null);
   const [engineNotice, setEngineNotice] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const { supported: speechSupported, listening, error: micError, listen, speakSegments } = useSpeech();
   const lastSpoken = useRef(-1);
@@ -468,7 +491,8 @@ function Chat({
     // Fase 10: fala a resposta inteira (explicação em português + frase de prática em
     // inglês), um segmento por vez, em vez de só a frase de prática isolada.
     if (voiceOn && last?.author === "agent" && last.segments?.length && lastIndex > lastSpoken.current) {
-      speakSegments(last.segments);
+      setIsSpeaking(true);
+      speakSegments(last.segments).finally(() => setIsSpeaking(false));
       lastSpoken.current = lastIndex;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -634,6 +658,14 @@ function Chat({
     onProfileChange({ ...profile, hasGeminiKey: false, engine: nextEngine });
   }
 
+  const statusMessage = listening
+    ? "Ouvindo..."
+    : sending
+    ? "Papo Reto está pensando..."
+    : isSpeaking
+    ? "Papo Reto está falando..."
+    : "";
+
   return (
     <div className="chat">
       {celebrating && <Confetti />}
@@ -705,31 +737,56 @@ function Chat({
           )}
         </div>
       )}
-      {engineNotice && <p className="mic-error">{engineNotice}</p>}
+      {engineNotice && (
+        <p className="mic-error" role="alert">
+          {engineNotice}
+        </p>
+      )}
 
-      <div className="stage">
+      <div className={`stage ${isSpeaking ? "speaking" : ""}`}>
         <Avatar mood={mood} />
+        <p
+          role="status"
+          aria-live="assertive"
+          className={`voice-status ${listening ? "is-listening" : isSpeaking ? "is-speaking" : ""}`}
+        >
+          {statusMessage}
+        </p>
         {!drillPhrase && speechSupported && (
           <button
             type="button"
             className={`talk-btn ${listening ? "listening" : ""}`}
             onClick={recordInput}
             disabled={listening}
+            aria-pressed={listening}
           >
             {listening ? "🎙️ Ouvindo..." : "🎤 Falar"}
           </button>
         )}
+        {(listening || isSpeaking) && (
+          <div className={`waveform ${listening ? "is-listening" : "is-speaking"}`} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
         {!drillPhrase && !speechSupported && (
           <p className="drill-hint">Reconhecimento de voz não suportado — use Chrome ou Edge.</p>
         )}
-        {!drillPhrase && micError && <p className="mic-error">{micError}</p>}
+        {!drillPhrase && micError && (
+          <p className="mic-error" role="alert">
+            {micError}
+          </p>
+        )}
       </div>
 
       {drillPhrase ? (
         <RepeatDrill phrase={drillPhrase} onContinue={finishDrill} />
       ) : (
         <>
-          <div className="messages compact">
+          <div className="messages compact" role="log" aria-live="polite" aria-label="Histórico de conversa">
             {messages.map((m, i) =>
               m.author === "agent" && m.text === "" && sending && i === messages.length - 1 ? (
                 <div key={i} className="bubble agent typing">
@@ -739,7 +796,7 @@ function Chat({
                 </div>
               ) : (
                 <div key={i} className={`bubble ${m.author}`}>
-                  {m.text}
+                  {m.author === "agent" ? renderBubbleText(m.text, m.practicePhrase) : m.text}
                 </div>
               )
             )}

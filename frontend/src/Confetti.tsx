@@ -1,4 +1,6 @@
-const COLORS = ["#2e7d6b", "#c9892f", "#a6431b", "#4fb89e", "#e6c89c"];
+// Fase 14: paleta neon do redesign (indigo, emerald, amber) em vez dos tons do
+// tema claro anterior.
+const COLORS = ["#5c6bc0", "#00c853", "#ffb74d", "#e0e0e0", "#8e9cde"];
 
 export default function Confetti() {
   const pieces = Array.from({ length: 24 }, (_, i) => i);

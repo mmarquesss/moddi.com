@@ -34,7 +34,7 @@
 
 .tabs button.active {
   background: var(--surface);
-  color: var(--brand-dark);
+  color: var(--brand-light);
   font-weight: 600;
   box-shadow: 0 1px 3px rgba(16, 24, 21, 0.12);
 }
@@ -57,6 +57,7 @@
 .chat {
   position: relative;
   background: var(--surface);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -68,12 +69,17 @@
 h1 {
   font-size: 1.2rem;
   margin: 0;
+  color: var(--text);
 }
 
 .chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.6);
 }
 
 .header-actions {
@@ -88,7 +94,7 @@ h1 {
   padding: 6px 10px;
   cursor: pointer;
   font-size: 0.82rem;
-  color: var(--text);
+  color: var(--brand-light);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
@@ -124,7 +130,7 @@ h1 {
   border-color: var(--brand);
   background: var(--brand-bg);
   font-weight: 600;
-  color: var(--brand-dark);
+  color: var(--brand-light);
 }
 
 .settings-group button:disabled {
@@ -188,6 +194,59 @@ h1 {
   text-align: center;
 }
 
+/* Anunciado por leitores de tela via aria-live — na Fase 14 virou visível também
+   (texto com glow, pedido no mockup), então já não precisa do utilitário sr-only;
+   a classe fica só pra outros usos futuros que precisem de texto só-leitor. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.voice-status {
+  min-height: 1.2em;
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.voice-status.is-listening {
+  color: var(--danger);
+  text-shadow: 0 0 12px rgba(255, 92, 92, 0.6);
+}
+
+.voice-status.is-speaking {
+  color: var(--success);
+  text-shadow: 0 0 12px rgba(0, 200, 83, 0.6);
+}
+
+.stage.speaking {
+  animation: stage-speak-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes stage-speak-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 200, 83, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 14px rgba(0, 200, 83, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage.speaking {
+    animation: none;
+  }
+}
+
 .talk-btn {
   display: inline-flex;
   align-items: center;
@@ -200,21 +259,32 @@ h1 {
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(46, 107, 90, 0.32);
+  box-shadow: 0 4px 14px rgba(92, 107, 192, 0.4);
+  animation: talk-idle-pulse 2.4s ease-in-out infinite;
   transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.15s ease;
 }
 
 .talk-btn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(46, 107, 90, 0.38);
+  box-shadow: 0 6px 18px rgba(92, 107, 192, 0.48);
 }
 
 .talk-btn:active:not(:disabled) {
   transform: translateY(0);
 }
 
+@keyframes talk-idle-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(92, 107, 192, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(92, 107, 192, 0);
+  }
+}
+
 .talk-btn.listening {
-  background: var(--danger);
+  background: var(--danger-strong);
   animation: talk-pulse 1.4s ease-in-out infinite;
 }
 
@@ -225,16 +295,74 @@ h1 {
 @keyframes talk-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(180, 35, 24, 0.35);
+    box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.4);
   }
   50% {
-    box-shadow: 0 0 0 10px rgba(180, 35, 24, 0);
+    box-shadow: 0 0 0 10px rgba(198, 40, 40, 0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .talk-btn,
   .talk-btn.listening {
     animation: none;
+  }
+}
+
+/* Decorativo, não reage ao volume real (ver decisão da Fase 14) — só dá o efeito
+   visual de onda enquanto ouvindo (indigo) ou falando (emerald). */
+.waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 22px;
+}
+
+.waveform span {
+  width: 3px;
+  height: 100%;
+  border-radius: 3px;
+  animation: waveform-bounce 0.9s ease-in-out infinite;
+}
+
+.waveform span:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.waveform span:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.waveform span:nth-child(4) {
+  animation-delay: 0.3s;
+}
+.waveform span:nth-child(5) {
+  animation-delay: 0.4s;
+}
+
+.waveform.is-listening span {
+  background: var(--danger);
+  box-shadow: 0 0 8px rgba(255, 92, 92, 0.7);
+}
+
+.waveform.is-speaking span {
+  background: var(--success);
+  box-shadow: 0 0 8px rgba(0, 200, 83, 0.7);
+}
+
+@keyframes waveform-bounce {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waveform span {
+    animation: none;
+    transform: scaleY(0.6);
   }
 }
 
@@ -265,15 +393,32 @@ h1 {
 
 .bubble.user {
   align-self: flex-end;
-  background: var(--brand);
-  color: white;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--brand);
+  box-shadow: 0 0 14px rgba(92, 107, 192, 0.3);
+  color: var(--text);
 }
 
 .bubble.agent {
   align-self: flex-start;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--brand-bg);
+  border: 1px solid rgba(92, 107, 192, 0.4);
+  box-shadow: 0 0 14px rgba(92, 107, 192, 0.14);
   color: var(--text);
+}
+
+/* Fase 14: frase de prática (a correção entre aspas) ganha destaque próprio dentro
+   da bolha, em vez de se perder no meio do texto em português. */
+.practice-phrase {
+  display: inline-block;
+  padding: 1px 8px;
+  margin: 0 1px;
+  border: 1px solid var(--success);
+  border-radius: 8px;
+  background: var(--success-bg);
+  color: var(--success);
+  box-shadow: 0 0 10px rgba(0, 200, 83, 0.35);
+  font-weight: 600;
 }
 
 .composer {
@@ -526,6 +671,7 @@ h1 {
   flex-direction: column;
   gap: 10px;
   background: var(--surface);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -581,6 +727,7 @@ h1 {
   flex-direction: column;
   gap: 18px;
   background: var(--surface);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -604,7 +751,7 @@ h1 {
   font-size: 1.4rem;
   font-weight: 700;
   margin: 0;
-  color: var(--brand-dark);
+  color: var(--brand-light);
 }
 
 .stat-label {
@@ -638,6 +785,7 @@ h1 {
   max-width: 420px;
   margin: 48px auto;
   background: var(--surface);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -773,6 +921,7 @@ h1 {
   overflow-y: auto;
   padding: 20px;
   background: var(--surface);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
@@ -788,7 +937,7 @@ h1 {
 .trilha .tag {
   font-size: 0.7rem;
   background: var(--brand-bg);
-  color: var(--brand-dark);
+  color: var(--brand-light);
   padding: 2px 8px;
   border-radius: 100px;
 }
@@ -807,8 +956,8 @@ h1 {
 }
 
 .lesson-card.done {
-  background: var(--brand-bg);
-  border-color: #cfe6dc;
+  background: var(--success-bg);
+  border-color: rgba(0, 200, 83, 0.45);
 }
 
 .lesson-card h3 {
